@@ -52,7 +52,7 @@ static int unescape(const char *inbuf, int len, char *outbuf)
 	return obuf - outbuf;
 }
 
-static int send_down(struct commbuf *buf, int size, int binary)
+static int send_down(struct icdibuf *buf, int size, int binary)
 {
 	int retlen, i, buflen;
 	uint8_t sum;
@@ -62,22 +62,22 @@ static int send_down(struct commbuf *buf, int size, int binary)
 
 	buflen = size;
 	if (binary)
-		memcpy(buf->buf, buf->c, size);
+		memcpy(buf->wbuf, buf->buf, size);
 	else
-		buflen = escape(buf->c, size, buf->buf);
+		buflen = escape(buf->buf, size, buf->wbuf);
 
 	sum = 0;
 	for (i = 1; i < buflen; i++)
-		sum += buf->buf[i];
-	buflen += sprintf(buf->buf + buflen, "%c%02x", END, sum);
+		sum += buf->wbuf[i];
+	buflen += sprintf(buf->wbuf + buflen, "%c%02x", END, sum);
 
-	retlen = write(buf->port, buf->buf, buflen);
+	retlen = write(buf->port, buf->wbuf, buflen);
 	if (retlen != buflen)
 		printf("Error transmitting data %s\n", strerror(errno));
 	return retlen;
 }
 
-static int recv_up(struct commbuf *buf, int *has_ack, int binary)
+static int recv_up(struct icdibuf *buf, int *has_ack, int binary)
 {
 	int retlen, len, srem, size;
 	char *u;
@@ -85,30 +85,30 @@ static int recv_up(struct commbuf *buf, int *has_ack, int binary)
 	*has_ack = 0;
 	retlen = 0;
 	srem = BUFSIZE;
-	u = buf->buf;
+	u = buf->wbuf;
 	do {
 		len = read(buf->port, u, srem);
 		if (len == -1) {
 			printf("Error receiving data %s\n", strerror(errno));
 			break;
 		}
-		if (len >= 1 && buf->buf[0] == '+')
+		if (len >= 1 && buf->wbuf[0] == '+')
 			*has_ack = 1;
 		retlen += len;
 		u += len;
 		srem -= len;
-	} while ((retlen < 3) || (buf->buf[retlen-3] != '#'));
+	} while ((retlen < 3) || (buf->wbuf[retlen-3] != '#'));
 
 	size = retlen;
 	if (binary)
-		memcpy(buf->c, buf->buf, retlen);
+		memcpy(buf->buf, buf->wbuf, retlen);
 	else
-		size = unescape(buf->buf, retlen, buf->c);
+		size = unescape(buf->wbuf, retlen, buf->buf);
 
 	return size;
 }
 
-static int sendrecv(struct commbuf *buf, int size, int binary)
+static int sendrecv(struct icdibuf *buf, int size, int binary)
 {
 	int retlen, has_ack;
 
@@ -129,74 +129,84 @@ static int sendrecv(struct commbuf *buf, int size, int binary)
 	return retlen;
 }
 
-int send_qRcmd(struct commbuf *buf, const char *cmd)
+int icdi_qRcmd(struct icdibuf *buf, const char *cmd)
 {
 	static const char cmdprefix[] = "qRcmd,";
 	int i, idx;
 	const char *cstr;
 
-	idx = sprintf(buf->c, "%c%s", START, cmdprefix);
+	idx = sprintf(buf->buf, "%c%s", START, cmdprefix);
         for (cstr = cmd, i = 0; i < strlen(cmd); i++)
-                idx += sprintf(buf->c + idx, "%02x", (unsigned int)(*cstr++));
+                idx += sprintf(buf->buf + idx, "%02x", (unsigned int)(*cstr++));
 
 	idx = sendrecv(buf, idx, 0);
 	return idx;
 }
 
 
-void print_echo(const struct commbuf *buf, int xlen)
+static inline void hex2str(const char *hex, int xlen, char *str, int size)
 {
-	int i;
-	char r, c;
+	char r, c, *ostr;
+	const char *ihex;
 
-	if (strncmp(buf->c, "+$", 2) != 0)
-		return;
-
-	for (i = strlen("+$"); buf->u8[i] != '#'; i += 2) {
-		r = buf->u8[i];
+	ihex = hex;
+	ostr = str;
+	for (ihex = hex, ostr = str; ihex < hex + xlen && ostr < str + size;
+			ihex++, ostr++) {
+		r = *ihex++;
 		c = (r <= '9') ? (r - '0') << 4 : (r - 'a' + 10) << 4;
-		r = buf->u8[i+1];
+		r = *ihex;
 		c |= (r <= '9') ? r - '0' : r - 'a' + 10;
-		printf("%c", c);
+		*ostr = c;
 	}
+	if (ostr < str + size)
+		*ostr = 0;
+	else
+		*(ostr+size-1) = 0;
 }
 
-static inline int sendstr(struct commbuf *buf, const char *str)
+static inline void u32_le2cpu(uint32_t *val)
+{
+}
+static inline void u32_cpu2le(uint32_t *val)
+{
+}
+
+static inline int sendstr(struct icdibuf *buf, const char *str)
 {
 	int idx;
 
-	idx = sprintf(buf->c, "%c%s", START, str);
+	idx = sprintf(buf->buf, "%c%s", START, str);
 	idx = sendrecv(buf, idx, 0);
 	return idx;
 }
 
-int qSupported(struct commbuf *buf, char *options, int len)
+int icdi_qSupported(struct icdibuf *buf, char *options, int len)
 {
-	int size, idx;
+	int size;
 
 	size = sendstr(buf, "qSupported");
-	memcpy(options, buf->c, size);
+	size = size > len? len : size;
+	memcpy(options, buf->buf, size);
 	options[size] = 0;
 	
 	return size;
 }
 
-void print_icdi_version(struct commbuf *buf)
+void icdi_version(struct icdibuf *buf, char *ver, int len)
 {
 	int xlen;
 	static const char *cmd = "version";
 
-	xlen = send_qRcmd(buf, cmd);
-	if (xlen <= 0)
-		return;
-
-	printf("ICDI version: ");
-	print_echo(buf, xlen);
+	*ver = 0;
+	xlen = icdi_qRcmd(buf, cmd);
+	if (xlen >= 5)
+		hex2str(buf->buf+2, xlen-5, ver, len);
 }
 
-struct commbuf *commbuf_init(const char *serial_port)
+struct icdibuf *icdi_init(const char *serial_port)
 {
-	struct commbuf *buf;
+	struct icdibuf *buf;
 	int port, sysret;
 	struct termios ctltio;
 
@@ -216,7 +226,43 @@ struct commbuf *commbuf_init(const char *serial_port)
 		fprintf(stderr, "tcgetattr failed for %s: %s\n", serial_port, strerror(errno));
 		return NULL;
 	}
-	buf = malloc(sizeof(struct commbuf));
-	buf->port = port;
+	buf = malloc(sizeof(struct icdibuf));
+	if (!buf)
+		fprintf(stderr, "Out of Memory!\n");
+	else
+		buf->port = port;
 	return buf;
+}
+
+int icdi_readu32(struct icdibuf *buf, uint32_t addr, uint32_t *val)
+{
+	int idx;
+
+	idx = sprintf(buf->buf, "%cx%08x,4", START, addr);
+	idx = sendrecv(buf, idx, 1);
+	*val = buf->bdat.u32[0];
+	return buf->bdat.O == 'O' && buf->bdat.K == 'K';
+}
+
+int icdi_writeu32(struct icdibuf *buf, uint32_t addr, uint32_t val)
+{
+	int idx;
+	uint32_t rval;
+
+	rval = val;
+	idx = sprintf(buf->buf, "%cX%08x,4:", START, addr);
+	u32_cpu2le(&rval);
+	memcpy(buf->buf+idx, &rval, sizeof(val));
+	idx += sizeof(val);
+	idx = sendrecv(buf, idx, 1);
+	return buf->bdat.O == 'O' && buf->bdat.K == 'K';
+}
+
+int icdi_stop_target(struct icdibuf *buf)
+{
+	int idx;
+
+	idx = sprintf(buf->buf, "%c?", START);
+	idx = sendrecv(buf, idx, 0);
+	return buf->bdat.O == 'S' && idx == 8;
 }
