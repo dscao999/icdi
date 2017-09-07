@@ -3,6 +3,9 @@
 /*
  * Memory Addresses of TM4C123x control (system and periperal)
  */
+#define FM_CTRL_BASE	0x400fd000
+#define FSIZE_OFFSET	0x0fc0
+
 #define SCSP_BASE	0x400fe000
 #define DID0_OFFSET	0x0
 #define DID1_OFFSET	0x4

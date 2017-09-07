@@ -1,16 +1,14 @@
-.PHONY: all
+.PHONY: all clean
 
 CC ?= gcc
 CFLAGS += -g -DDEBUG
 
-all: getver
+all: dumpflash
 
 release: CFLAGS += -O2
 
-getver: get_icdi_version.o icdi.o
+dumpflash: dumpflash.o icdi.o
 	$(LINK.o) $^ -o $@
 
 clean:
-	rm -f *.o getver
-
-.PHONY: all clean
+	rm -f *.o dumpflash

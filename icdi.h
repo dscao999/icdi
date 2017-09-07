@@ -7,7 +7,7 @@
 #define FLASH_BLOCK_SIZE 512
 #define FLASH_ERASE_SIZE 1024
 /* Prefix + potentially every flash byte escaped */
-#define BUFSIZE (64 + 2*FLASH_BLOCK_SIZE)
+#define BUFSIZE 2176  /* 128 + 2048 */
 
 #define START	'$'
 #define END	'#'
@@ -18,7 +18,6 @@
 #define END_LEN		3 
 
 struct bindat {
-	char plus;
 	char dollar;
 	char O;
 	char K;
@@ -31,6 +30,7 @@ struct bindat {
 } __attribute__((packed));
 struct icdibuf {
 	int port;
+	int len;
 	union {
 		char buf[BUFSIZE];
 		struct bindat bdat;
@@ -46,15 +46,14 @@ static inline void icdi_exit(struct icdibuf *buf)
 };
 
 int icdi_qRcmd(struct icdibuf *buf, const char *cmd);
-void icdi_version(struct icdibuf *buf, char *ver, int len);
+int icdi_version(struct icdibuf *buf, char *ver, int len);
 int icdi_qSupported(struct icdibuf *buf, char *options, int len);
+
 int icdi_readu32(struct icdibuf *buf, uint32_t addr, uint32_t *val);
 int icdi_writeu32(struct icdibuf *buf, uint32_t addr, uint32_t val);
-int icdi_stop_target(struct icdibuf *buf);
 
-static inline int icdi_debug_cmd(struct icdibuf *buf, const char *cmd)
-{
-	icdi_qRcmd(buf, 
-}
+int icdi_readbin(struct icdibuf *buf, uint32_t addr, int len, char *binstr);
+
+int icdi_stop_target(struct icdibuf *buf);
 
 #endif /* ICDI_DSCAO__ */

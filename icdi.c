@@ -29,60 +29,60 @@ static int escape(const char *inbuf, int len, char *outbuf)
 static int unescape(const char *inbuf, int len, char *outbuf)
 {
 	const char *ibuf;
-	char *obuf, cc, pc;
-	int repeat, i;
+	char *obuf, cc;
 
 	*outbuf = *inbuf;
 	ibuf = inbuf + 1;
 	obuf = outbuf + 1;
-	pc = 0;
 	while (ibuf < inbuf + len) {
 		cc = *ibuf++;
 		if (cc == ESCAPE)
 			cc = *ibuf++ ^ 0x20;
-		else if (cc == STAR) {
-			cc = pc;
-			repeat = *ibuf++ - 29;
-			for (i = 0; i < repeat - 1; i++)
-				*obuf++ = cc;
-		}
 		*obuf++ = cc;
-		pc = cc;
 	}
 	return obuf - outbuf;
 }
 
-static int send_down(struct icdibuf *buf, int size, int binary)
+static int send_down(struct icdibuf *buf)
 {
-	int retlen, i, buflen;
+	int retlen, i, buflen, tries;
 	uint8_t sum;
+	char echo;
 
-	if (size <= 0)
+	if (buf->len <= 0)
 		return 0;
 
-	buflen = size;
-	if (binary)
-		memcpy(buf->wbuf, buf->buf, size);
-	else
-		buflen = escape(buf->buf, size, buf->wbuf);
+	buflen = escape(buf->buf, buf->len, buf->wbuf);
 
 	sum = 0;
 	for (i = 1; i < buflen; i++)
 		sum += buf->wbuf[i];
 	buflen += sprintf(buf->wbuf + buflen, "%c%02x", END, sum);
 
-	retlen = write(buf->port, buf->wbuf, buflen);
-	if (retlen != buflen)
-		printf("Error transmitting data %s\n", strerror(errno));
+	tries = 0;
+	echo = '-';
+	do {
+		retlen = write(buf->port, buf->wbuf, buflen);
+		if (retlen == -1) {
+			printf("Error transmitting data %s\n", strerror(errno));
+			break;
+		}
+		read(buf->port, &echo, 1);
+		tries++;
+	} while (echo != '+' && tries < 5);
+	if (echo != '+') {
+		fprintf(stderr, "Connection to target is not stable\n");
+		retlen = -1;
+	}
+
 	return retlen;
 }
 
-static int recv_up(struct icdibuf *buf, int *has_ack, int binary)
+static int recv_up(struct icdibuf *buf)
 {
-	int retlen, len, srem, size;
+	int retlen, len, srem;
 	char *u;
 
-	*has_ack = 0;
 	retlen = 0;
 	srem = BUFSIZE;
 	u = buf->wbuf;
@@ -92,40 +92,24 @@ static int recv_up(struct icdibuf *buf, int *has_ack, int binary)
 			printf("Error receiving data %s\n", strerror(errno));
 			break;
 		}
-		if (len >= 1 && buf->wbuf[0] == '+')
-			*has_ack = 1;
 		retlen += len;
 		u += len;
 		srem -= len;
 	} while ((retlen < 3) || (buf->wbuf[retlen-3] != '#'));
 
-	size = retlen;
-	if (binary)
-		memcpy(buf->buf, buf->wbuf, retlen);
-	else
-		size = unescape(buf->wbuf, retlen, buf->buf);
+	buf->len = unescape(buf->wbuf, retlen, buf->buf);
 
-	return size;
+	return buf->len;
 }
 
-static int sendrecv(struct icdibuf *buf, int size, int binary)
+static int sendrecv(struct icdibuf *buf)
 {
-	int retlen, has_ack;
+	int retlen;
 
-	if (size + END_LEN > BUFSIZE) {
-		fprintf(stderr, "Output buffer overflow!\n");
-		return 0;
-	}
-
-	retlen = send_down(buf, size, binary);
+	retlen = send_down(buf);
 	if (retlen <= 0)
 		return retlen;
-	retlen = recv_up(buf, &has_ack, binary);
-	if (retlen <= 0)
-		return retlen;
-	if (!has_ack)
-		retlen = 0;
-
+	retlen = recv_up(buf);
 	return retlen;
 }
 
@@ -138,8 +122,8 @@ int icdi_qRcmd(struct icdibuf *buf, const char *cmd)
 	idx = sprintf(buf->buf, "%c%s", START, cmdprefix);
         for (cstr = cmd, i = 0; i < strlen(cmd); i++)
                 idx += sprintf(buf->buf + idx, "%02x", (unsigned int)(*cstr++));
-
-	idx = sendrecv(buf, idx, 0);
+	buf->len = idx;
+	idx = sendrecv(buf);
 	return idx;
 }
 
@@ -177,7 +161,8 @@ static inline int sendstr(struct icdibuf *buf, const char *str)
 	int idx;
 
 	idx = sprintf(buf->buf, "%c%s", START, str);
-	idx = sendrecv(buf, idx, 0);
+	buf->len = idx;
+	idx = sendrecv(buf);
 	return idx;
 }
 
@@ -186,22 +171,23 @@ int icdi_qSupported(struct icdibuf *buf, char *options, int len)
 	int size;
 
 	size = sendstr(buf, "qSupported");
-	size = size > len? len : size;
-	memcpy(options, buf->buf, size);
+	size = size > len? len : size-4;
+	memcpy(options, buf->buf+1, size);
 	options[size] = 0;
 	
 	return size;
 }
 
-void icdi_version(struct icdibuf *buf, char *ver, int len)
+int icdi_version(struct icdibuf *buf, char *ver, int len)
 {
 	int xlen;
 	static const char *cmd = "version";
 
 	*ver = 0;
 	xlen = icdi_qRcmd(buf, cmd);
-	if (xlen >= 5)
-		hex2str(buf->buf+2, xlen-5, ver, len);
+	if (xlen > 4)
+		hex2str(buf->buf+1, xlen-4, ver, len);
+	return xlen - 4;
 }
 
 struct icdibuf *icdi_init(const char *serial_port)
@@ -229,32 +215,50 @@ struct icdibuf *icdi_init(const char *serial_port)
 	buf = malloc(sizeof(struct icdibuf));
 	if (!buf)
 		fprintf(stderr, "Out of Memory!\n");
-	else
+	else {
 		buf->port = port;
+		buf->len = 0;
+	}
 	return buf;
 }
 
 int icdi_readu32(struct icdibuf *buf, uint32_t addr, uint32_t *val)
 {
-	int idx;
-
-	idx = sprintf(buf->buf, "%cx%08x,4", START, addr);
-	idx = sendrecv(buf, idx, 1);
+	buf->len = sprintf(buf->buf, "%cx%08x,4", START, addr);
+	sendrecv(buf);
 	*val = buf->bdat.u32[0];
 	return buf->bdat.O == 'O' && buf->bdat.K == 'K';
 }
 
+int icdi_readbin(struct icdibuf *buf, uint32_t addr, int len, char *binstr)
+{
+	int rlen;
+
+	if (len > BUFSIZ - 128) {
+		fprintf(stderr, "chunk too large: %d -- %d\n", len, BUFSIZ);
+		return 0;
+	}
+
+	buf->len = sprintf(buf->buf, "%cx%08x,%x", START, addr, len);
+	rlen = sendrecv(buf);
+	if (rlen <= 0 || buf->bdat.O != 'O' || buf->bdat.K != 'K') {
+		fprintf(stderr, "Memory read failed\n");
+		return 0;
+	}
+	memcpy(binstr, buf->buf+4, buf->len-7);
+	return buf->len-7;
+}
+
 int icdi_writeu32(struct icdibuf *buf, uint32_t addr, uint32_t val)
 {
-	int idx;
 	uint32_t rval;
 
 	rval = val;
-	idx = sprintf(buf->buf, "%cX%08x,4:", START, addr);
+	buf->len = sprintf(buf->buf, "%cX%08x,4:", START, addr);
 	u32_cpu2le(&rval);
-	memcpy(buf->buf+idx, &rval, sizeof(val));
-	idx += sizeof(val);
-	idx = sendrecv(buf, idx, 1);
+	memcpy(buf->buf+buf->len, &rval, sizeof(val));
+	buf->len += sizeof(val);
+	sendrecv(buf);
 	return buf->bdat.O == 'O' && buf->bdat.K == 'K';
 }
 
@@ -262,7 +266,7 @@ int icdi_stop_target(struct icdibuf *buf)
 {
 	int idx;
 
-	idx = sprintf(buf->buf, "%c?", START);
-	idx = sendrecv(buf, idx, 0);
+	buf->len = sprintf(buf->buf, "%c?", START);
+	idx = sendrecv(buf);
 	return buf->bdat.O == 'S' && idx == 8;
 }
