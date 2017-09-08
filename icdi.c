@@ -268,5 +268,23 @@ int icdi_stop_target(struct icdibuf *buf)
 
 	buf->len = sprintf(buf->buf, "%c?", START);
 	idx = sendrecv(buf);
-	return buf->bdat.O == 'S' && idx == 8;
+	return buf->bdat.O == 'S' && idx == 7;
+}
+
+int icdi_flash_erase(struct icdibuf *buf, uint32_t addr, int len)
+{
+	buf->len = sprintf(buf->buf, "%cvFlashErase:%08x,%08x", START, addr, len);
+	sendrecv(buf);
+	return buf->bdat.O == 'O' && buf->bdat.K == 'K';
+}
+
+int icdi_flash_write(struct icdibuf *buf, uint32_t addr, char *binstr, int len)
+{
+	int idx;
+
+	idx = sprintf(buf->buf, "%cvFlashWrite:%08x:", START, addr);
+	memcpy(buf->buf+idx, binstr, len);
+	buf->len = idx + len;
+	sendrecv(buf);
+	return buf->bdat.O == 'O' && buf->bdat.K == 'K';
 }

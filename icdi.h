@@ -48,12 +48,29 @@ static inline void icdi_exit(struct icdibuf *buf)
 int icdi_qRcmd(struct icdibuf *buf, const char *cmd);
 int icdi_version(struct icdibuf *buf, char *ver, int len);
 int icdi_qSupported(struct icdibuf *buf, char *options, int len);
+static inline int icdi_debug_sreset(struct icdibuf *buf)
+{
+	return icdi_qRcmd(buf, "debug sreset");
+}
+static inline int icdi_debug_creset(struct icdibuf *buf)
+{
+	return icdi_qRcmd(buf, "debug creset");
+}
+static inline int icdi_chip_reset(struct icdibuf *buf)
+{
+	if (icdi_qRcmd(buf, "set vectorcatch 0") &&
+		icdi_qRcmd(buf, "debug disable"))
+		return 1;
+	else
+		return 0;
+}
 
 int icdi_readu32(struct icdibuf *buf, uint32_t addr, uint32_t *val);
 int icdi_writeu32(struct icdibuf *buf, uint32_t addr, uint32_t val);
 
 int icdi_readbin(struct icdibuf *buf, uint32_t addr, int len, char *binstr);
+int icdi_flash_write(struct icdibuf *buf, uint32_t addr, char *binstr, int len);
+int icdi_flash_erase(struct icdibuf *buf, uint32_t addr, int len);
 
 int icdi_stop_target(struct icdibuf *buf);
-
 #endif /* ICDI_DSCAO__ */

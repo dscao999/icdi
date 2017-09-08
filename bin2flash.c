@@ -19,42 +19,47 @@ static inline int debug_clock(struct icdibuf *buf)
 struct flash_spec {
 	uint32_t addr;
 	uint32_t len;
+	int erase;
 };
 
-static uint32_t flash_dump(const char *binfile, struct icdibuf *buf,
+static uint32_t flash_write(const char *binfile, struct icdibuf *buf,
 			const struct flash_spec *fspec)
 {
-	uint32_t len, addr;
+	uint32_t addr;
 	FILE *fbin;
-	int err, cklen;
+	int cklen, len;
 	char *chunk;
 
-	fbin = fopen(binfile, "wb");
+	fbin = fopen(binfile, "rb");
 	if (!fbin) {
 		fprintf(stderr, "Cannot open file: %s\n", binfile);
 		return 0;
 	}
 
-	chunk = malloc(FLASH_BLOCK_SIZE);
-	err = 0;
-	addr = fspec->addr;
-	len = 0;
-	do {
-		if (!tm4c123_ready(buf)) {
-			fprintf(stderr, "Micro Chip got stuck!\n");
-			goto exit_10;
-		}
-		cklen = icdi_readbin(buf, addr, FLASH_BLOCK_SIZE, chunk);
-		if (cklen != FLASH_BLOCK_SIZE) {
-			err = 1;
-			fprintf(stderr, "Flash read error!\n");
-		}
-		fwrite(chunk, 1, cklen, fbin);
-		len += cklen;
-		addr += cklen;
-	} while (len < fspec->len && !err);
+	if (fspec->erase && !icdi_flash_erase(buf, 0, 0)) {
+		fprintf(stderr, "Cannot erase flash memory!\n");
+		return 0;
+	}
 
-exit_10:
+	len = 0;
+	chunk = malloc(FLASH_ERASE_SIZE);
+	addr = fspec->addr;
+	while ((cklen = fread(chunk, 1, FLASH_ERASE_SIZE, fbin))) {
+		if (fspec->erase == 0 &&
+			!icdi_flash_erase(buf, addr, FLASH_ERASE_SIZE)) {
+			fprintf(stderr, "Cannot erase flash at %08X\n", addr);
+			break;
+		}
+		if (!icdi_flash_write(buf, addr, chunk, cklen)) {
+			fprintf(stderr, "Flash write failed at: %08X\n", addr);
+			break;
+		}
+		addr += cklen;
+		len += cklen;
+	}
+	if (!feof(fbin))
+		fprintf(stderr, "Flash operation failed!\n");
+
 	free(chunk);
 	fclose(fbin);
 	return len;
@@ -62,24 +67,23 @@ exit_10:
 
 struct cmdargs {
 	uint32_t addr, len;
+	int erase;
 	const char *binfile, *icdi_dev;
 };
 
 static int parse_cmdline(struct cmdargs *args, int argc, char *argv[])
 {
 	static const struct option lopts[] = {
-		{.name = "output", .has_arg = required_argument, .flag = NULL, .val = 'o'},
+		{.name = "fwbin", .has_arg = required_argument, .flag = NULL, .val = 'f'},
 		{.name = "icdi", .has_arg = required_argument, .flag = NULL, .val = 'i'},
 		{.name = "addr", .has_arg = required_argument, .flag = NULL, .val = 'a'},
-		{.name = "length", .has_arg = required_argument, .flag = NULL, .val = 'l'},
+		{.name = "erase", .has_arg = no_argument, .flag = NULL, .val = 'e'},
 		{.name = NULL, .has_arg = 0, .flag = 0, .val = 0}
 	};
-	static const char *opts = "o:i:a:l:";
+	static const char *opts = "f:i:a:e";
 	extern char *optarg;
 	extern int optind, opterr, optopt;
 	int fin, lidx, optc, retv, sysret;
-	char *suffix;
-	uint32_t len;
 	struct stat mstat;
 
 	retv = 0;
@@ -87,13 +91,12 @@ static int parse_cmdline(struct cmdargs *args, int argc, char *argv[])
 	opterr = 0;
 	fin = 0;
 	args->addr = 0;
-	len = 0;
+	args->erase = 1;
 	do {
 		optopt = 0;
 		lidx = -1;
 		optc = getopt_long(argc, argv,  opts, lopts, &lidx);
-		if (optarg && *optarg == '-' &&
-			(optc == 'o' || optc == 'i')) {
+		if (optarg && *optarg == '-' && optc != 'e') {
 			fprintf(stderr, "Missing arguments for ");
 			if (lidx == -1)
 				fprintf(stderr, "'%c'\n", optc);
@@ -113,7 +116,7 @@ static int parse_cmdline(struct cmdargs *args, int argc, char *argv[])
 			else
 				fprintf(stderr, "'%s'\n", argv[optind-1]);
 			break;
-		case 'o':
+		case 'f':
 			args->binfile = optarg;
 			break;
 		case 'i':
@@ -122,27 +125,17 @@ static int parse_cmdline(struct cmdargs *args, int argc, char *argv[])
 		case 'a':
 			args->addr = strtol(optarg, NULL, 0);
 			break;
-		case 'l':
-			len = strtol(optarg, &suffix, 0);
-			switch(*suffix) {
-			case 'M':
-			case 'm':
-				len *= 1024;
-			case 'K':
-			case 'k':
-				len *= 1024;
-			}
+		case 'e':
+			args->erase = 1;
 			break;
 		default:
 			fprintf(stderr, "Parse options logic error\n");
 		}
 	} while (fin == 0);
 
-	if (len != 0)
-		args->len = ((len-1)/FLASH_BLOCK_SIZE+1)*FLASH_BLOCK_SIZE;
-	if ((args->addr % FLASH_BLOCK_SIZE) != 0) {
+	if ((args->addr % FLASH_ERASE_SIZE) != 0) {
 		fprintf(stderr, "Address must be divisible by %d\n",
-			FLASH_BLOCK_SIZE);
+			FLASH_ERASE_SIZE);
 		retv = 4;
 	}
 	if (args->icdi_dev == NULL) {
@@ -160,15 +153,26 @@ static int parse_cmdline(struct cmdargs *args, int argc, char *argv[])
 			retv = 20;
 		}
 	}
+	args->len = 0;
 	if (args->binfile == NULL) {
-		args->binfile = "/tmp/tivac.bin";
-		fprintf(stderr, "BIN file set to \"/tmp/tivac.bin\"\n");
-	}
-	sysret = stat(args->binfile, &mstat);
-	if (sysret == 0 && !S_ISREG(mstat.st_mode)) {
-		fprintf(stderr, "File \"%s\" is not a regular file\n",
-			args->binfile);
-		retv = 28;
+		fprintf(stderr, "A FW binary file must be specified.\n");
+		retv = 24;
+	} else {
+		sysret = stat(args->binfile, &mstat);
+		if (sysret == -1 || !S_ISREG(mstat.st_mode)) {
+			fprintf(stderr, "File \"%s\" is invalid",
+				args->binfile);
+			if (sysret == -1)
+				fprintf(stderr, ":%s\n", strerror(errno));
+			else
+				fprintf(stderr, ".\n");
+			retv = 28;
+		} else  if (mstat.st_size >= 4*1024*1024*1024ul) {
+			fprintf(stderr, "File size too large: %lu\n",
+				(unsigned long)mstat.st_size);
+			retv = 32;
+		} else
+			args->len = mstat.st_size;
 	}
 
 	return retv;
@@ -189,6 +193,7 @@ int main(int argc, char *argv[])
 		return retv;;
 	fspec.addr = args.addr;
 	fspec.len = args.len;
+	fspec.erase = args.erase;
 
 	buf = icdi_init(args.icdi_dev);
 	if (buf == NULL)
@@ -247,13 +252,22 @@ int main(int argc, char *argv[])
 		goto exit_10;
 	}
 	printf("Flash Size: %dKiB\n", flashsiz/1024);
-	if (fspec.len == 0)
-		fspec.len = flashsiz;
+	if ((fspec.addr + fspec.len) > flashsiz) {
+		fprintf(stderr, "File exceeds Flash Size: %u+%u\n",
+			fspec.addr, fspec.len);
+		retv = 24;
+		goto exit_10;
+	}
 
-	flash_dump(args.binfile, buf, &fspec);
+	if (!tm4c123_ready(buf)) {
+		fprintf(stderr, "Micro chip stuck.\n");
+		retv = 28;
+		goto exit_10;
+	}
 
-	if (!icdi_chip_reset(buf))
-		fprintf(stderr, "Failed to reset the chip.\n");
+	flash_write(args.binfile, buf, &fspec);
+
+	icdi_chip_reset(buf);
 exit_10:
 	icdi_exit(buf);
 	return retv;
