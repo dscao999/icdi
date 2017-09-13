@@ -5,10 +5,12 @@ CC ?= gcc
 all: dumpflash txicdi flashbin
 
 release: CFLAGS += -O2
+release: LDFLAGS += -Wl,-O2
 
 all: CFLAGS += -g -DDEBUG
+all: LDFLAGS += -Wl,-g
 
-release: dumpflash
+release: dumpflash flashbin txicdi
 
 dumpflash: dumpflash.o icdi.o
 	$(LINK.o) $^ -o $@

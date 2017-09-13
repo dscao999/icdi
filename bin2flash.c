@@ -43,11 +43,19 @@ static uint32_t flash_write(const char *binfile, struct icdibuf *buf,
 
 	len = 0;
 	chunk = malloc(FLASH_ERASE_SIZE);
+	if (!chunk) {
+		fprintf(stderr, "Out of Memory!\n");
+		goto exit_10;
+	}
 	addr = fspec->addr;
 	while ((cklen = fread(chunk, 1, FLASH_ERASE_SIZE, fbin))) {
 		if (fspec->erase == 0 &&
 			!icdi_flash_erase(buf, addr, FLASH_ERASE_SIZE)) {
 			fprintf(stderr, "Cannot erase flash at %08X\n", addr);
+			break;
+		}
+		if (!tm4c123_debug_ready(buf)) {
+			fprintf(stderr, "Debugger stuck! Chip Locked!\n");
 			break;
 		}
 		if (!icdi_flash_write(buf, addr, chunk, cklen)) {
@@ -61,6 +69,7 @@ static uint32_t flash_write(const char *binfile, struct icdibuf *buf,
 		fprintf(stderr, "Flash operation failed!\n");
 
 	free(chunk);
+exit_10:
 	fclose(fbin);
 	return len;
 }
@@ -91,7 +100,7 @@ static int parse_cmdline(struct cmdargs *args, int argc, char *argv[])
 	opterr = 0;
 	fin = 0;
 	args->addr = 0;
-	args->erase = 1;
+	args->erase = 0;
 	do {
 		optopt = 0;
 		lidx = -1;
@@ -195,7 +204,7 @@ int main(int argc, char *argv[])
 	fspec.len = args.len;
 	fspec.erase = args.erase;
 
-	buf = icdi_init(args.icdi_dev);
+	buf = icdi_init(args.icdi_dev, FLASH_ERASE_SIZE);
 	if (buf == NULL)
 		return 1000;
 
@@ -220,7 +229,7 @@ int main(int argc, char *argv[])
 		goto exit_10;
 	}
 	if (val & 1) {
-		fprintf(stderr, "Internal ROM is mapped at address 0x0\n");
+		fprintf(stderr, "Flash memory is not mapped at address 0x0\n");
 		retv = 8;
 		goto exit_10;
 	}
@@ -259,7 +268,7 @@ int main(int argc, char *argv[])
 		goto exit_10;
 	}
 
-	if (!tm4c123_ready(buf)) {
+	if (!tm4c123_debug_ready(buf)) {
 		fprintf(stderr, "Micro chip stuck.\n");
 		retv = 28;
 		goto exit_10;
@@ -267,7 +276,8 @@ int main(int argc, char *argv[])
 
 	flash_write(args.binfile, buf, &fspec);
 
-	icdi_chip_reset(buf);
+	if (!icdi_chip_reset(buf))
+		fprintf(stderr, "Cannot reset the Chip.\n");
 exit_10:
 	icdi_exit(buf);
 	return retv;

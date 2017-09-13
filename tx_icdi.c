@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
 		return 8;
 	}
 
-	buf = icdi_init(argv[1]);
+	buf = icdi_init(argv[1], FLASH_ERASE_SIZE);
 	if (buf == NULL)
 		return 1000;
 

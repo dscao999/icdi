@@ -24,7 +24,7 @@
 
 #define FP_CTRL		0xe0002000
 
-static inline int tm4c123_ready(struct icdibuf *buf)
+static inline int tm4c123_debug_ready(struct icdibuf *buf)
 {
 	uint32_t dhcsr;
 	int count;

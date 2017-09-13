@@ -133,8 +133,6 @@ static inline void hex2str(const char *hex, int xlen, char *str, int size)
 	char r, c, *ostr;
 	const char *ihex;
 
-	ihex = hex;
-	ostr = str;
 	for (ihex = hex, ostr = str; ihex < hex + xlen && ostr < str + size;
 			ihex++, ostr++) {
 		r = *ihex++;
@@ -190,7 +188,7 @@ int icdi_version(struct icdibuf *buf, char *ver, int len)
 	return xlen - 4;
 }
 
-struct icdibuf *icdi_init(const char *serial_port)
+struct icdibuf *icdi_init(const char *serial_port, int esize)
 {
 	struct icdibuf *buf;
 	int port, sysret;
@@ -218,6 +216,7 @@ struct icdibuf *icdi_init(const char *serial_port)
 	else {
 		buf->port = port;
 		buf->len = 0;
+		buf->esize = esize;
 	}
 	return buf;
 }
@@ -245,19 +244,20 @@ int icdi_readbin(struct icdibuf *buf, uint32_t addr, int len, char *binstr)
 		fprintf(stderr, "Memory read failed\n");
 		return 0;
 	}
-	memcpy(binstr, buf->buf+4, buf->len-7);
+	memcpy(binstr, buf->bdat.u8, buf->len-7);
 	return buf->len-7;
 }
 
 int icdi_writeu32(struct icdibuf *buf, uint32_t addr, uint32_t val)
 {
 	uint32_t rval;
+	int idx;
 
 	rval = val;
-	buf->len = sprintf(buf->buf, "%cX%08x,4:", START, addr);
+	idx = sprintf(buf->buf, "%cX%08x,4:", START, addr);
 	u32_cpu2le(&rval);
-	memcpy(buf->buf+buf->len, &rval, sizeof(val));
-	buf->len += sizeof(val);
+	memcpy(buf->buf+idx, &rval, sizeof(val));
+	buf->len = idx + sizeof(val);
 	sendrecv(buf);
 	return buf->bdat.O == 'O' && buf->bdat.K == 'K';
 }
@@ -273,6 +273,11 @@ int icdi_stop_target(struct icdibuf *buf)
 
 int icdi_flash_erase(struct icdibuf *buf, uint32_t addr, int len)
 {
+	if ((addr % buf->esize) != 0 || (len % buf->esize) != 0) {
+		fprintf(stderr, "Address/Length is not divisible by %d\n",
+			buf->esize);
+		return 0;
+	}
 	buf->len = sprintf(buf->buf, "%cvFlashErase:%08x,%08x", START, addr, len);
 	sendrecv(buf);
 	return buf->bdat.O == 'O' && buf->bdat.K == 'K';
@@ -282,6 +287,11 @@ int icdi_flash_write(struct icdibuf *buf, uint32_t addr, char *binstr, int len)
 {
 	int idx;
 
+	if ((addr % buf->esize) != 0 || (len % buf->esize) != 0) {
+		fprintf(stderr, "Address/Length is not divisible by %d\n",
+			buf->esize);
+		return 0;
+	}
 	idx = sprintf(buf->buf, "%cvFlashWrite:%08x:", START, addr);
 	memcpy(buf->buf+idx, binstr, len);
 	buf->len = idx + len;

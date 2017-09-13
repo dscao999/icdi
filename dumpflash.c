@@ -40,7 +40,7 @@ static uint32_t flash_dump(const char *binfile, struct icdibuf *buf,
 	addr = fspec->addr;
 	len = 0;
 	do {
-		if (!tm4c123_ready(buf)) {
+		if (!tm4c123_debug_ready(buf)) {
 			fprintf(stderr, "Micro Chip got stuck!\n");
 			goto exit_10;
 		}
@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
 	fspec.addr = args.addr;
 	fspec.len = args.len;
 
-	buf = icdi_init(args.icdi_dev);
+	buf = icdi_init(args.icdi_dev, FLASH_ERASE_SIZE);
 	if (buf == NULL)
 		return 1000;
 
