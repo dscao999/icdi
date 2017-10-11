@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
 	char options[128];
 	uint32_t val, did0, did1;
 	int retv;
-	uint32_t flashsiz;
+	uint32_t flashsiz, en0, pri0, stctrl;
 
 	if (argc < 2) {
 		fprintf(stderr, "The ICDI port name must be specified.\n");
@@ -88,10 +88,21 @@ int main(int argc, char *argv[])
 		goto exit_10;
 	}
 	printf("Flash Size: %dKiB\n", flashsiz/1024);
+	if (!icdi_readu32(buf, SCSS_BASE+SCSS_EN0_OFFSET, &en0))
+		fprintf(stderr, "Cannot read Interrupt enable reg 0.\n");
+	else
+		printf("Interrupt Enable Register 0: %08X\n", en0);
+	if (!icdi_readu32(buf, SCSS_BASE+SCSS_PRI0_OFFSET, &pri0))
+		fprintf(stderr, "Cannot read Interrupt Priority Reg 0.\n");
+	else
+		printf("Interrupt Priority Register 0: %08X\n", pri0);
 
-	icdi_qRcmd(buf, "set vectorcatch 0");
+	if (!icdi_readu32(buf, SCSS_BASE+SCSS_STCTRL_OFFSET, &stctrl))
+		fprintf(stderr, "Cannot read SysTick Control Register.\n");
+	else
+		printf("SysTick Control Register: %08X\n", pri0);
+
 	icdi_qRcmd(buf, "debug disable");
-
 exit_10:
 	icdi_exit(buf);
 	return retv;

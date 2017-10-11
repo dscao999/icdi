@@ -176,7 +176,7 @@ static int parse_cmdline(struct cmdargs *args, int argc, char *argv[])
 			else
 				fprintf(stderr, ".\n");
 			retv = 28;
-		} else  if (mstat.st_size >= 4*1024*1024*1024ul) {
+		} else  if (mstat.st_size >= 1024*1024*1024ul) {
 			fprintf(stderr, "File size too large: %lu\n",
 				(unsigned long)mstat.st_size);
 			retv = 32;

@@ -287,8 +287,8 @@ int icdi_flash_write(struct icdibuf *buf, uint32_t addr, char *binstr, int len)
 {
 	int idx;
 
-	if ((addr % buf->esize) != 0 || (len % buf->esize) != 0) {
-		fprintf(stderr, "Address/Length is not divisible by %d\n",
+	if ((addr % buf->esize) != 0) {
+		fprintf(stderr, "Address is not divisible by %d\n",
 			buf->esize);
 		return 0;
 	}
