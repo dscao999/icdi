@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <assert.h>
+#include "miscutils.h"
 #include "icdi.h"
 #include "tm4c123x.h"
 
@@ -22,6 +23,10 @@ int main(int argc, char *argv[])
 	int retv;
 	uint32_t flashsiz, en0, pri0, stctrl;
 
+	if (!instance_start(lock)) {
+		fprintf(stderr, "ICDI port is being locked.\n");
+		return 100;
+	}
 	if (argc < 2) {
 		fprintf(stderr, "The ICDI port name must be specified.\n");
 		return 8;
@@ -105,5 +110,6 @@ int main(int argc, char *argv[])
 	icdi_qRcmd(buf, "debug disable");
 exit_10:
 	icdi_exit(buf);
+	instance_exit(lock);
 	return retv;
 }

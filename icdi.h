@@ -73,4 +73,6 @@ int icdi_flash_write(struct icdibuf *buf, uint32_t addr, char *binstr, int len);
 int icdi_flash_erase(struct icdibuf *buf, uint32_t addr, int len);
 
 int icdi_stop_target(struct icdibuf *buf);
+
+#define lock "icdi_lock"
 #endif /* ICDI_DSCAO__ */

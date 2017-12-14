@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <getopt.h>
 #include <sys/stat.h>
+#include "miscutils.h"
 #include "icdi.h"
 #include "tm4c123x.h"
 
@@ -197,6 +198,10 @@ int main(int argc, char *argv[])
 	struct cmdargs args;
 	struct flash_spec fspec;
 
+	if (!instance_start(lock)) {
+		fprintf(stderr, "ICDI interface is being locked.\n");
+		return 100;
+	}
 	memset(&args, 0, sizeof(args));
 	if ((retv = parse_cmdline(&args, argc, argv)))
 		return retv;;
@@ -278,7 +283,9 @@ int main(int argc, char *argv[])
 
 	if (!icdi_chip_reset(buf))
 		fprintf(stderr, "Cannot reset the Chip.\n");
+	icdi_qRcmd(buf, "debug disable");
 exit_10:
 	icdi_exit(buf);
+	instance_exit(lock);
 	return retv;
 }
