@@ -64,6 +64,13 @@ static inline int icdi_chip_reset(struct icdibuf *buf)
 	icdi_qRcmd(buf, "debug hreset");
 	return buf->bdat.O = 'O' && buf->bdat.K == 'K';
 };
+static inline int debug_clock(struct icdibuf *buf)
+{
+	static const char *cmd = "debug clock";
+
+	icdi_qRcmd(buf, cmd);
+	return buf->buf[1] == 'O' && buf->buf[2] == 'K';
+}
 
 int icdi_readu32(struct icdibuf *buf, uint32_t addr, uint32_t *val);
 int icdi_writeu32(struct icdibuf *buf, uint32_t addr, uint32_t val);

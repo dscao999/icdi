@@ -9,14 +9,6 @@
 #include "icdi.h"
 #include "tm4c123x.h"
 
-static inline int debug_clock(struct icdibuf *buf)
-{
-	static const char *cmd = "debug clock";
-
-	icdi_qRcmd(buf, cmd);
-	return buf->buf[1] == 'O' && buf->buf[2] == 'K';
-}
-
 struct flash_spec {
 	uint32_t addr;
 	uint32_t len;
@@ -289,12 +281,38 @@ int main(int argc, char *argv[])
 	if (!icdi_chip_reset(buf))
 		fprintf(stderr, "Cannot reset the Chip.\n");
 	printf("Reset done!\n");
-/*	sleep(1);
-	if (!tm4c123_debug_ready(buf)) {
-		fprintf(stderr, "Micro chip stuck.\n");
-		retv = 28;
+	icdi_exit(buf);
+	sleep(1);
+	buf = icdi_init(args.icdi_dev, FLASH_ERASE_SIZE);
+	if (buf == NULL) {
+		fprintf(stderr, "Cannot reopen port: %s->%s\n", args.icdi_dev,
+				strerror(errno));
+		return 1000;
 	}
-	icdi_qRcmd(buf, "debug disable"); */
+	printf("\nAfter Reset...\n");
+	icdi_version(buf, options, 128);
+	printf("ICDI Version: %s", options);
+	if (icdi_qSupported(buf, options, 128))
+		printf("Supported: %s\n", options);
+
+	if (!debug_clock(buf)) {
+		fprintf(stderr, "Debug Clock is not stable!\n");
+		retv = 100;
+		goto exit_10;
+	}
+        if (!icdi_stop_target(buf)) {
+                fprintf(stderr, "Cannot stop target.\n");
+                retv = 104;
+                goto exit_10;
+        }
+        if (!icdi_readu32(buf, SCSP_BASE+RM_CTRL_OFFSET, &val)) {
+                fprintf(stderr, "Cannot read RM_CTRL: %#08x\n",
+                        SCSP_BASE+RM_CTRL_OFFSET); 
+                retv = 108;
+                goto exit_10;
+        }
+
+	icdi_qRcmd(buf, "debug disable");
 exit_10:
 	icdi_exit(buf);
 	instance_exit(lock);

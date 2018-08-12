@@ -9,14 +9,6 @@
 #include "icdi.h"
 #include "tm4c123x.h"
 
-static inline int debug_clock(struct icdibuf *buf)
-{
-	static const char *cmd = "debug clock";
-
-	icdi_qRcmd(buf, cmd);
-	return buf->buf[1] == 'O' && buf->buf[2] == 'K';
-}
-
 struct flash_spec {
 	uint32_t addr;
 	uint32_t len;
