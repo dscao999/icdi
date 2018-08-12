@@ -281,9 +281,20 @@ int main(int argc, char *argv[])
 
 	flash_write(args.binfile, buf, &fspec);
 
+	printf("Flash finished!\n");
+	if (!tm4c123_debug_ready(buf)) {
+		fprintf(stderr, "Micro chip stuck.\n");
+		retv = 28;
+	}
 	if (!icdi_chip_reset(buf))
 		fprintf(stderr, "Cannot reset the Chip.\n");
-	icdi_qRcmd(buf, "debug disable");
+	printf("Reset done!\n");
+/*	sleep(1);
+	if (!tm4c123_debug_ready(buf)) {
+		fprintf(stderr, "Micro chip stuck.\n");
+		retv = 28;
+	}
+	icdi_qRcmd(buf, "debug disable"); */
 exit_10:
 	icdi_exit(buf);
 	instance_exit(lock);

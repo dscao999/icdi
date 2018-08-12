@@ -22,4 +22,4 @@ flashbin: bin2flash.o icdi.o
 	$(LINK.o) $^ -o $@
 
 clean:
-	rm -f *.o dumpflash txicdi
+	rm -f *.o dumpflash txicdi flashbin
